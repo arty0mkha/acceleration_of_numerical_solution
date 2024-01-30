@@ -14,7 +14,7 @@ def anim_result(data_u:np.ndarray, timestep, L, H, picture:bool, showMe:bool):
         return line
     
     fig, ax = plt.subplots()
-    line = plt.imshow(data_u[0], aspect = 'auto', cmap = 'Greys_r', extent = [0,L,0,H])             # u slice
+    line = plt.imshow(data_u[0], aspect = 'auto', cmap = 'turbo', extent = [0,L,0,H])             # u slice
     plt.colorbar(line, ax=ax)                                                                   
         # gradient for V
 
@@ -31,4 +31,4 @@ def anim_result(data_u:np.ndarray, timestep, L, H, picture:bool, showMe:bool):
     if picture == True:
         writer = animation.PillowWriter(                                                                # saving picture
             fps=30, metadata=dict(artist='Doofenshmirtz Evil Incorporated'), bitrate=1800)
-        ani.save(f"gifs/t={round(data_u.shape[0]*timestep,1)}, max_x={L}, max_y={H},.gif", writer=writer)
+        ani.save(f"gifs/t={round(data_u.shape[0]*timestep,3)}, max_x={L}, max_y={H},.gif", writer=writer)

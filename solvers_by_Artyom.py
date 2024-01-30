@@ -35,25 +35,23 @@ def convection_diffusion_solver(initial_condition, height, length, simulation_ti
 
 
     Dx = np.zeros(shape=(Ny+2,Nx+2))
-    for i in range(Ny-1):
+    for i in range(Ny+1):
         Dx[i,i] = -1
         Dx[i+1,i] = 1
     Dx /= dx
 
     Dxx = np.zeros(shape=(Ny+2,Nx+2))
-    for i in range(1,Ny-1):
+    for i in range(1,Ny+1):
         Dxx[i-1,i]= 1
         Dxx[i,i] = -2
         Dxx[i+1,i] = 1
     Dxx /= dx**2
 
     Dyy = np.zeros(shape=(Ny+2,Nx+2))
-    for i in range(1,Ny-1):
+    for i in range(1,Ny+1):
         Dyy[i,i-1] = 1
         Dyy[i,i] = -2
         Dyy[i,i+1] = 1
-    Dyy /= dy**2
-    ## починить ГУ
     divergence = np.zeros(shape=(vx.shape[0],concentration.shape[-1]))
     for i in tqdm(range(Nt-1)):
         laplace = np.matmul(Dyy,concentration[i]) + np.matmul(concentration[i], Dxx)
