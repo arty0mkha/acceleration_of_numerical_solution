@@ -127,3 +127,84 @@ def convection_diffusion_solver(initial_condition, height, length, simulation_ti
         concentration = new_concentration
 
     return concentration, dt, Pe
+
+
+def jax_convection_diffusion(initial_condition, height, length, simulation_time, vx, diffusion_constant):
+
+    def loopfun(initial_condition, vx):
+        new_initial_condition = jnp.zeros(initial_condition.shape[0])
+        for j in range(initial_condition.shape[1]):
+            new_initial_condition = initial_condition.at[:, jnp.add(-j, -1)].set(initial_condition[:, j])
+        initial_condition = new_initial_condition
+        vx = -vx 
+        print('revert')   
+        return True
+    
+    Ny = vx.shape[0]
+    Nx = int(length/height*Ny)
+
+    dx = length/Nx
+    dy = height/Ny
+    dt = (dx**2 + dy**2)/8
+    Nt = int(simulation_time/dt)
+
+    characteristic_length = jnp.divide(jnp.dot(dx,dy), jnp.add(jnp.dot(2, dx), jnp.add(2, dy)))
+    Pe = jnp.divide(jnp.dot(characteristic_length, vx), diffusion_constant)
+    #lax.batch_matmul
+    vx = jnp.concatenate((jnp.array([0]), vx, jnp.array([0])))
+
+    #lax.cond(pred = lax.gt(Pe[jnp.int64(jnp.divide(Pe.shape[0],2))], 0), loopfun(initial_condition, vx), false_fun = None)
+
+    # neumann conditions on all boundaries?
+    print (type(Nx))
+    print (type(Ny))
+    concentration = jnp.zeros(shape = (Nt, Ny+2, Nx+2))
+
+    concentration = concentration.at[0, 1:-1, 1:-1].set(initial_condition)
+
+    concentration = concentration.at[0, 0, 1:-1].set(concentration[0, 1, 1:-1])     # boundary top
+    concentration = concentration.at[0, -1, 1:-1].set(concentration[0, -2, 1:-1])   # boundary bottom
+    concentration = concentration.at[0, 0, 1:-1].set(concentration[0, 1, 1:-1])     # boundary left
+    concentration = concentration.at[0, -1, 1:-1].set(concentration[0,-2,1:-1])     # boundary right
+
+    Dx = jnp.zeros(shape=(Nx+2, Nx+2))
+    for i in range(Nx+1):
+        Dx = Dx.at[i, i].set(-1.)
+        Dx = Dx.at[i+1, i].set(1.)
+    Dx = jnp.divide(Dx, dx)
+
+    Dxx = jnp.zeros(shape=(Nx+2, Nx+2))
+    for i in range(1, Nx+1):
+        Dxx = Dxx.at[jnp.add(i, -1), i].set(1.)
+        Dxx = Dxx.at[i, i].set(-2.)
+        Dxx = Dxx.at[jnp.add(i, 1), i].set(1.)
+
+    Dxx = jnp.divide(Dxx, jnp.dot(dx, dx))
+
+    Dyy = jnp.zeros(shape=(Ny+2, Ny+2))
+    for i in range(1, Ny+1):
+        Dyy = Dyy.at[i, jnp.add(i, -1)].set(1.)
+        Dyy = Dyy.at[i, i].set(-2.)
+        Dyy = Dyy.at[i, jnp.add(i, 1)].set(1.)
+
+    Dyy = jnp.divide(Dyy, jnp.dot(dy, dy))
+
+    def add(x,y):
+        return x + y
+    
+    divergence = jnp.zeros(shape=(vx.shape[0], concentration.shape[-1]))
+    for i in range(Nt-1):
+        laplace = vmap(add)(jnp.matmul(Dyy,concentration[i]), jnp.matmul(concentration[i], Dxx))
+        dconcentration_dx = jnp.matmul(concentration[i], Dx)
+        for j in range(1,Ny):
+            divergence = divergence.at[j].set(jnp.dot(vx[j], dconcentration_dx[j]))
+        concentration = concentration.at[i+1].set(jnp.add(concentration[i], jnp.dot(dt, jnp.add(jnp.dot(diffusion_constant,laplace), divergence))))
+
+        concentration = concentration.at[jnp.add(i, 1), 0, 1:-1].set(concentration[jnp.add(i, 1), 1, 1:-1])     # boundary top
+        concentration = concentration.at[jnp.add(i, 1), -1, 1:-1].set(concentration[jnp.add(i, 1), -2, 1:-1])   # boundary bottom
+        concentration = concentration.at[jnp.add(i, 1), 0, 1:-1].set(concentration[jnp.add(i, 1), 1, 1:-1])     # boundary left
+        concentration = concentration.at[jnp.add(i, 1), -1, 1:-1].set(concentration[jnp.add(i, 1), -2, 1:-1])   # boundary right
+        Pe = Pe + 1
+    print ('aaaaa')
+
+    return concentration, dt, Pe
