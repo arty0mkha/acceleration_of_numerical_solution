@@ -56,7 +56,7 @@ def jax_solver(pressure_on_right_boundary, pressure_on_left_boundary, height, le
 
     return jnp.matmul(jnp.linalg.inv(matrix), vector)
 
-jitsolver = jit(jax_solver, static_argnums=(4,))
+jax_poiseuille_solver = jit(jax_solver, static_argnums=(4,))
 
 
 def convection_diffusion_solver(initial_condition, height, length, simulation_time, vx, diffusion_constant):
