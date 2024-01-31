@@ -1,5 +1,12 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from tqdm import tqdm
+
+import jax.numpy as jnp
+from jax import jit
+from jax import lax
+
+
 def poiseuille_solver(pressure_on_right_boundary, pressure_on_left_boundary, height, length, Ny, viscosity):
     # dirichlet conditions u(0)=u(h)=0
     dy = height/Ny
@@ -21,6 +28,35 @@ def poiseuille_solver(pressure_on_right_boundary, pressure_on_left_boundary, hei
     return velocity
 
 
+def jax_solver(pressure_on_right_boundary, pressure_on_left_boundary, height, length, Ny, viscosity):
+    def jax_change_element(matrix, pos1, pos2, value):
+        return matrix.at[pos1].set(matrix[pos1].at[pos2].set(value))
+
+    def loopfunction (matrix, i):
+        matrix = jitchange(matrix, i, i-1, 1.)
+        matrix = jitchange(matrix, i, i, -2.)
+        matrix = jitchange(matrix, i, i+1, 1.)
+        return matrix
+
+    jitchange = jit(jax_change_element)
+    jitloop = jit(loopfunction)
+
+    dy = jnp.divide(height, Ny)
+
+    pressure_gradient = jnp.divide(jnp.add(pressure_on_right_boundary, -pressure_on_left_boundary), length)
+    const = jnp.divide(jnp.dot(dy, dy), viscosity)
+
+    val = jnp.dot(const, pressure_gradient)
+    vector = jnp.concatenate((jnp.array([0]), val*jnp.ones(Ny - 2), jnp.array([0])))
+    matrix = jnp.zeros(shape=(Ny,Ny))
+
+    matrix = jitchange(matrix, 0, 0, 1.)
+    matrix = jitchange(matrix, -1, -1, 1.)
+    matrix = lax.fori_loop(1, Ny-1, lambda i,matrix_local: jitloop(matrix_local, i), matrix)
+
+    return jnp.matmul(jnp.linalg.inv(matrix), vector)
+
+jitsolver = jit(jax_solver, static_argnums=(4,))
 
 
 def convection_diffusion_solver(initial_condition, height, length, simulation_time, vx, diffusion_constant):
