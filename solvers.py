@@ -1,10 +1,14 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-
-import jax.numpy as jnp
+from scipy.sparse import csc_matrix
+from jax import numpy as jnp
 from jax import jit
-from jax import lax
+from jax.experimental import sparse
+from gif_creation import anim_result
+from jax import ops
+from functools import partial
+from PIL import Image
+import matplotlib.pyplot as plt
+from tqdm.notebook import tqdm
 
 
 def poiseuille_solver(pressure_on_right_boundary, pressure_on_left_boundary, height, length, Ny, viscosity):
@@ -114,61 +118,23 @@ def convection_diffusion_solver(initial_condition, height, length, simulation_ti
 
 def jax_convection_diffusion_solver(initial_condition, height, length, simulation_time, vx, diffusion_constant):
     
-    def make_Dx(N,dx):
-        Dx = np.zeros(shape=(N, N))
-        for i in range(N-1):
-            Dx[i, i] = -1
-            Dx[i+1, i] = 1
-        Dx /= dx
-        return Dx 
-
-
-    def make_Dxx(N,dx):
-        Dxx = np.zeros(shape=(N, N))
-        for i in range(1, N-1):
-            Dxx[i-1, i] = 1
-            Dxx[i, i] = -2
-            Dxx[i+1, i] = 1
-        Dxx /= dx**2
-        return Dxx 
-
-
-    def make_Dyy(N,dy):
-        Dyy = np.zeros(shape=(N, N))
-        for i in range(1, N-1):
-            Dyy[i, i-1] = 1
-            Dyy[i, i] = -2
-            Dyy[i, i+1] = 1
-        Dyy /= dy**2
-        return Dyy
-
+    def make_matrix(shape):
+        matrix = np.eye(shape)
+        matrix[0,0] = 0
+        matrix[0,1] = 1
+        matrix[-1,-1] = 0
+        matrix [-1, -2] = 1
+        return matrix
 
     Ny = vx.shape[0]
-    Nx = int(length/height*Ny)
-    dx = length/Nx
     dy = height/Ny
-    dt = (dx**2 + dy**2)/8
+    dx = dy
+    Nx = int(length/dx) + 1
+    dx = length/Nx
+    dt = (dy**2/(4*diffusion_constant))
     Nt = int(simulation_time/dt)
+    vx = np.concatenate(([0], vx, [0])) 
 
-    vx = np.concatenate( ([0], vx, [0])) 
-
-    Dx = make_Dx(Nx+2,dx)
-    Dxx = make_Dxx(Nx+2,dx)
-    Dyy = make_Dyy(Ny+2,dy)
-
-    Dx = sparse.BCOO.fromdense(Dx)
-    Dxx = sparse.BCOO.fromdense(Dxx)
-    Dyy = sparse.BCOO.fromdense(Dyy)
-
-    # neumann conditions on all boundaries?
-    concentration = np.zeros(shape=(Nt, Ny+2, Nx+2))
-    concentration[0, 1:-1, 1:-1] = initial_condition
-    concentration[0, 0, 1:-1] = concentration[0, 1, 1:-1] # boundary top
-    concentration[0, -1, 1:-1] = concentration[0, -2, 1:-1] # boundary bottom
-    concentration[0, 0, 1:-1] = concentration[0, 1, 1:-1] # boundary left
-    concentration[0, -1, 1:-1] = concentration[0, -2, 1:-1] # boundary right
-
-    divergence = np.zeros(shape=(vx.shape[0],concentration.shape[-1]))
 
     @partial(jit, static_argnums=(2))
     def sp_matmul(A, B, shape):
@@ -188,15 +154,45 @@ def jax_convection_diffusion_solver(initial_condition, height, length, simulatio
         res = ops.segment_sum(prod, rows, shape)
         return res
 
+    @partial(jit, static_argnums=(2))
+    def sp_matmul_reverse(A,B, shape):
+        """
+        Arguments:
+            B: (N, M) sparse matrix represented as a tuple (indexes, values)
+            A: (M,K) dense matrix
+            shape: value of N
+        Returns:
+            (N, K) dense matrix
+        """
+        assert A.ndim == 2
+        indexes, values = B
+        rows, cols = indexes
+        in_ = A.take(cols, axis=0)
+        prod = in_*values[:, None]
+        res = ops.segment_sum(prod, rows, shape)
+        return res
 
-    for i in range(Nt-1):
-        laplace = sp_matmul((Dyy.indices.T, Dyy.data), concentration[i], Ny+2) + sp_matmul((Dxx.indices.T, Dxx.data), concentration[i], concentration[i].shape[0])
-        dconcentration_dx = sp_matmul((Dx.indices.T, Dx.data), concentration[i], concentration[i].shape[0])
+    Dx = sparse.BCOO.fromdense(make_Dx(Nx+2,dx))
+    Dxx = sparse.BCOO.fromdense(make_Dxx(Nx+2,dx))
+    Dyy = sparse.BCOO.fromdense(make_Dyy(Ny+2,dy))
+
+    Sx = sparse.BCOO.fromdense(make_matrix(Nx+2))
+    Sy = sparse.BCOO.fromdense(make_matrix(Ny+2).T)
+
+    concentration = jnp.zeros(shape=(Nt, Ny+2, Nx+2))
+    concentration = concentration.at[0, 1:-1, 1:-1].set(initial_condition)
+    val =  sp_matmul_reverse(sp_matmul((Sy.indices.T, Sy.data), concentration[0], Ny+2), (Sx.indices.T, Sx.data), Ny+2)
+    concentration = concentration.at[0].set(val)
+
+    divergence = np.zeros(shape=(vx.shape[0],concentration.shape[-1]))
+    for i in tqdm(range(Nt-1)):
+        first = sp_matmul((Dyy.indices.T, Dyy.data), concentration[i], Ny+2)
+        second = sp_matmul_reverse(concentration[i], (Dxx.indices.T, Dxx.data), Ny+2)
+        laplace = first + second
+        dconcentration_dx = sp_matmul_reverse(concentration[i], (Dx.indices.T, Dx.data), Ny+2)
         for j in range(1,Ny):
             divergence[j] = vx[j]*dconcentration_dx[j]
-        concentration[i+1] = concentration[i] + dt*(diffusion_constant*laplace - divergence)
-        concentration[i+1, 0, 1:-1] = concentration[i+1, 1, 1:-1] # boundary top
-        concentration[i+1, -1, 1:-1] = concentration[i+1, -2, 1:-1] # boundary bottom
-        concentration[i+1, 0, 1:-1] = concentration[i+1, 1, 1:-1] # boundary left
-        concentration[i+1, -1, 1:-1] = concentration[i+1, -2, 1:-1] # boundary right
-    return concentration, dt
+        concentration = concentration.at[i+1].set(concentration[i] + dt*(diffusion_constant*laplace - divergence))
+        matr = sp_matmul((Sy.indices.T, Sy.data), concentration[i+1], Ny+2)
+        concentration = concentration.at[i+1].set(sp_matmul_reverse(matr, (Sx.indices.T, Sx.data), Ny+2))
+    return concentration[:, 1:-1, 1:-1], dt
