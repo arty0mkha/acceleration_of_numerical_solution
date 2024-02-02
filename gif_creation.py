@@ -30,5 +30,12 @@ def anim_result(data_u:np.ndarray, timestep, L, H, picture:bool, showMe:bool):
 
     if picture == True:
         writer = animation.PillowWriter(                                                                # saving picture
-            fps=30, metadata=dict(artist='Doofenshmirtz Evil Incorporated'), bitrate=1800)
+            fps=60, metadata=dict(artist='Doofenshmirtz Evil Incorporated'), bitrate=1800)
         ani.save(f"gifs/t={round(data_u.shape[0]*timestep,3)}, L={L}, H={H}.gif", writer=writer)
+
+
+def generate_init(path, shapeX, shapeY, norm):
+    image = Image.open(path).convert('L')
+    new_image = image.resize((shapeX, shapeY))
+    img = np.asarray(new_image)/norm
+    return img
