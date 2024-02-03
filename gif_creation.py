@@ -1,11 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 
-def anim_result(data_u:np.ndarray, timestep:float, L:float, H:float, picture:bool, showMe:bool):
+def anim_result(data_u:np.ndarray, timestep:float, L:float, H:float, picture:bool, showMe:bool, colour:str):
     """
     Создание .gif файла
     """
@@ -17,7 +17,7 @@ def anim_result(data_u:np.ndarray, timestep:float, L:float, H:float, picture:boo
     
 
     fig, ax = plt.subplots()
-    line = plt.imshow(data_u[0], aspect = 'auto', cmap = 'turbo', extent = [0,L,0,H])
+    line = plt.imshow(data_u[0], cmap = colour, extent = [0,L,0,H])
     plt.colorbar(line, ax=ax)                                                                   
 
     ax.set_xlabel('x, m')
@@ -35,11 +35,13 @@ def anim_result(data_u:np.ndarray, timestep:float, L:float, H:float, picture:boo
         ani.save(f"gifs/t={round(data_u.shape[0]*timestep,3)}, L={L}, H={H}.gif", writer=writer)
 
 
-def generate_init(path:str, shapeX:int, shapeY:int, norm:float):
+def generate_init(path:str, shapeX:int, shapeY:int, norm:float, reverse:bool):
     """
     Генерация НУ из картинки
     """
+
     image = Image.open(path).convert('L')
+    if reverse==True:
+        image = ImageOps.invert(image)
     new_image = image.resize((shapeX, shapeY))
-    img = np.asarray(new_image)/norm
-    return img
+    return np.asarray(new_image)/norm
