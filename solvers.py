@@ -3,16 +3,17 @@ from scipy.sparse import csc_matrix
 from jax import numpy as jnp
 from jax import jit
 from jax.experimental import sparse
-from gif_creation import anim_result
 from jax import ops
 from functools import partial
-from PIL import Image
-import matplotlib.pyplot as plt
 from tqdm.notebook import tqdm
 
 
+
 def poiseuille_solver(pressure_on_right_boundary, pressure_on_left_boundary, height, length, Ny, viscosity):
-    # dirichlet conditions u(0)=u(h)=0
+    """
+    Течение Пуазейля, реализация на numpy
+    """
+
     dy = height/Ny
     pressure_gradient = (pressure_on_right_boundary - pressure_on_left_boundary)/length
     const = (dy**2)/viscosity
@@ -33,6 +34,10 @@ def poiseuille_solver(pressure_on_right_boundary, pressure_on_left_boundary, hei
 
 
 def jax_poiseuille_solver(pressure_on_right_boundary, pressure_on_left_boundary, height, length, Ny, viscosity):
+    """
+    Течение Пуазейля, реализация на jax/numpy
+    """
+
     dy = height/Ny
     pressure_gradient = (pressure_on_right_boundary - pressure_on_left_boundary)/length
     const = (dy**2)/viscosity
@@ -51,35 +56,38 @@ def jax_poiseuille_solver(pressure_on_right_boundary, pressure_on_left_boundary,
         return jnp.matmul(jnp.linalg.inv(matrix), vector)
     return second_step(matrix, vector)
 
+def make_Dx(N,dx):
+    Dx = np.zeros(shape=(N, N))
+    for i in range(N-1):
+        Dx[i, i] = -1
+        Dx[i+1, i] = 1
+    Dx /= dx
+    return Dx 
+    
+def make_Dxx(N,dx):
+    Dxx = np.zeros(shape=(N, N))
+    for i in range(1, N-1):
+        Dxx[i-1, i] = 1
+        Dxx[i, i] = -2
+        Dxx[i+1, i] = 1
+    Dxx /= dx**2
+    return Dxx 
+    
+def make_Dyy(N,dy):
+    Dyy = np.zeros(shape=(N, N))
+    for i in range(1, N-1):
+        Dyy[i, i-1] = 1
+        Dyy[i, i] = -2
+        Dyy[i, i+1] = 1
+    Dyy /= dy**2
+    return Dyy
+
 
 def convection_diffusion_solver(initial_condition, height, length, simulation_time, vx, diffusion_constant):
+    """
+    Численное решение уравнения конвекции-диффузии на numpy
+    """
 
-    def make_Dx(N,dx):
-        Dx = np.zeros(shape=(N, N))
-        for i in range(N-1):
-            Dx[i, i] = -1
-            Dx[i+1, i] = 1
-        Dx /= dx
-        return Dx 
-    
-    def make_Dxx(N,dx):
-        Dxx = np.zeros(shape=(N, N))
-        for i in range(1, N-1):
-            Dxx[i-1, i] = 1
-            Dxx[i, i] = -2
-            Dxx[i+1, i] = 1
-        Dxx /= dx**2
-        return Dxx 
-    
-    def make_Dyy(N,dy):
-        Dyy = np.zeros(shape=(N, N))
-        for i in range(1, N-1):
-            Dyy[i, i-1] = 1
-            Dyy[i, i] = -2
-            Dyy[i, i+1] = 1
-        Dyy /= dy**2
-        return Dyy
-    
     Ny = vx.shape[0]
     Nx = int(length/height*Ny)
     dx = length/Nx
@@ -117,7 +125,10 @@ def convection_diffusion_solver(initial_condition, height, length, simulation_ti
 
 
 def jax_convection_diffusion_solver(initial_condition, height, length, simulation_time, vx, diffusion_constant):
-    
+    """
+    Численное решение уравнения конвекции-диффузии, полная хр нь
+    """
+
     def make_matrix(shape):
         matrix = np.eye(shape)
         matrix[0,0] = 0
@@ -125,6 +136,7 @@ def jax_convection_diffusion_solver(initial_condition, height, length, simulatio
         matrix[-1,-1] = 0
         matrix [-1, -2] = 1
         return matrix
+
 
     Ny = vx.shape[0]
     dy = height/Ny
@@ -138,14 +150,6 @@ def jax_convection_diffusion_solver(initial_condition, height, length, simulatio
 
     @partial(jit, static_argnums=(2))
     def sp_matmul(A, B, shape):
-        """
-        Arguments:
-            A: (N, M) sparse matrix represented as a tuple (indexes, values)
-            B: (M,K) dense matrix
-            shape: value of N
-        Returns:
-            (N, K) dense matrix
-        """
         assert B.ndim == 2
         indexes, values = A
         rows, cols = indexes
@@ -154,16 +158,9 @@ def jax_convection_diffusion_solver(initial_condition, height, length, simulatio
         res = ops.segment_sum(prod, rows, shape)
         return res
 
+
     @partial(jit, static_argnums=(2))
     def sp_matmul_reverse(A,B, shape):
-        """
-        Arguments:
-            B: (N, M) sparse matrix represented as a tuple (indexes, values)
-            A: (M,K) dense matrix
-            shape: value of N
-        Returns:
-            (N, K) dense matrix
-        """
         assert A.ndim == 2
         indexes, values = B
         rows, cols = indexes
